@@ -1,6 +1,7 @@
 using UnityEngine;
+using UnityEngine.Video;
 
-public class RaycastInteractor : MonoBehaviour
+public class RaycastInteractorVideo : MonoBehaviour
 {
     [Header("Raycast Settings")]
     public float maxDistance = 5f;
@@ -11,34 +12,31 @@ public class RaycastInteractor : MonoBehaviour
     public GameObject interactionCanvas;
     public GameObject pausePlayCanvas;
 
-    [Header("Audio Settings")]
+    [Header("Video Settings")]
     public float interactionRange = 5f;
 
     private GameObject currentTarget;
-    private AudioSource currentAudio;
+    private VideoPlayer currentVideo;
     private bool hasInteracted = false;
-    private bool isAudioPlaying = false;
+    private bool isVideoPlaying = false;
 
-    private GameObject objectLookedAt; // objeto actualmente apuntado por raycast
-    
+    private GameObject objectLookedAt;
+
     // Variables para Canvas Group
     private CanvasGroup interactionCanvasGroup;
     private CanvasGroup pausePlayCanvasGroup;
 
     void Start()
     {
-        // Inicializar Canvas Groups
         InitializeCanvasGroup(ref interactionCanvasGroup, interactionCanvas);
         InitializeCanvasGroup(ref pausePlayCanvasGroup, pausePlayCanvas);
-        
-        // Asegurar que estén transparentes al inicio
+
         SetCanvasAlpha(interactionCanvasGroup, 0f);
         SetCanvasAlpha(pausePlayCanvasGroup, 0f);
     }
 
     void Update()
     {
-        // Lanzar raycast en cada frame
         Ray ray = new Ray(Camera.main.transform.position, Camera.main.transform.forward);
         RaycastHit hit;
         bool hitSomething = Physics.Raycast(ray, out hit, maxDistance, interactableLayer);
@@ -48,34 +46,38 @@ public class RaycastInteractor : MonoBehaviour
         {
             float distance = Vector3.Distance(transform.position, objectLookedAt.transform.position);
 
-            // Si está dentro del rango de interacción
             if (distance <= interactionRange)
             {
-                // Cambiamos de objetivo si es necesario
                 if (currentTarget != objectLookedAt)
                 {
                     currentTarget = objectLookedAt;
-                    currentAudio = currentTarget.GetComponent<AudioSource>();
-                    isAudioPlaying = currentAudio != null && AudioManager.Instance.IsAudioPlaying(currentAudio);
-                    hasInteracted = isAudioPlaying;
+                    currentVideo = currentTarget.GetComponent<VideoPlayer>();
+                    isVideoPlaying = currentVideo != null && currentVideo.isPlaying;
+                    hasInteracted = isVideoPlaying;
                 }
 
-                // Actualizamos canvas mientras apuntamos
                 UpdateCanvas();
 
-                // Detectar interacción con tecla F
-                if (Input.GetKeyDown(interactKey) && currentAudio != null)
+                if (Input.GetKeyDown(interactKey) && currentVideo != null)
                 {
                     if (!hasInteracted)
                     {
-                        AudioManager.Instance.PlayAudio(currentAudio, currentTarget);
-                        isAudioPlaying = true;
+                        currentVideo.Play();
+                        isVideoPlaying = true;
                         hasInteracted = true;
                     }
                     else
                     {
-                        AudioManager.Instance.ToggleAudio();
-                        isAudioPlaying = AudioManager.Instance.IsAudioPlaying(currentAudio);
+                        if (currentVideo.isPlaying)
+                        {
+                            currentVideo.Pause();
+                            isVideoPlaying = false;
+                        }
+                        else
+                        {
+                            currentVideo.Play();
+                            isVideoPlaying = true;
+                        }
                     }
 
                     UpdateCanvas();
@@ -83,27 +85,24 @@ public class RaycastInteractor : MonoBehaviour
             }
             else
             {
-                HandleExitRange(); // si salimos del rango, reiniciamos audio y ocultamos canvas
+                HandleExitRange();
             }
         }
         else
         {
-            // Si dejamos de apuntar
             HandleNotLookingAtObject();
         }
 
-        // Revisión constante por si el jugador se aleja sin raycast apuntando
-        if (currentTarget != null && currentAudio != null)
+        if (currentTarget != null && currentVideo != null)
         {
             float distance = Vector3.Distance(transform.position, currentTarget.transform.position);
             if (distance > interactionRange)
             {
-                HandleExitRange(); // <— aquí también reiniciamos
+                HandleExitRange();
             }
         }
     }
 
-    // Métodos helper para Canvas Group
     private void InitializeCanvasGroup(ref CanvasGroup canvasGroup, GameObject canvas)
     {
         if (canvas != null)
@@ -121,7 +120,6 @@ public class RaycastInteractor : MonoBehaviour
         if (canvasGroup != null)
         {
             canvasGroup.alpha = alpha;
-            // También manejamos la interactividad y blockeo de raycasts
             canvasGroup.interactable = alpha > 0.1f;
             canvasGroup.blocksRaycasts = alpha > 0.1f;
         }
@@ -129,15 +127,13 @@ public class RaycastInteractor : MonoBehaviour
 
     private void HandleNotLookingAtObject()
     {
-        // Si no apuntamos pero el audio está sonando o pausado, mostrar solo pausePlayCanvas
-        if (currentAudio != null && (AudioManager.Instance.IsAudioPlaying(currentAudio) || hasInteracted))
+        if (currentVideo != null && (currentVideo.isPlaying || hasInteracted))
         {
             SetCanvasAlpha(pausePlayCanvasGroup, 1f);
             SetCanvasAlpha(interactionCanvasGroup, 0f);
         }
         else
         {
-            // Ocultar solo si fue activado por raycast
             SetCanvasAlpha(interactionCanvasGroup, 0f);
             SetCanvasAlpha(pausePlayCanvasGroup, 0f);
         }
@@ -145,15 +141,14 @@ public class RaycastInteractor : MonoBehaviour
 
     private void HandleExitRange()
     {
-        // Reiniciar audio completamente al salir del rango
-        if (currentAudio != null)
+        if (currentVideo != null)
         {
-            AudioManager.Instance.StopCurrentAudio(); // ya reinicia desde el AudioManager
+            currentVideo.Stop();
         }
 
         currentTarget = null;
-        currentAudio = null;
-        isAudioPlaying = false;
+        currentVideo = null;
+        isVideoPlaying = false;
         hasInteracted = false;
 
         SetCanvasAlpha(interactionCanvasGroup, 0f);
@@ -162,7 +157,7 @@ public class RaycastInteractor : MonoBehaviour
 
     private void UpdateCanvas()
     {
-        if (currentAudio == null) 
+        if (currentVideo == null)
         {
             SetCanvasAlpha(interactionCanvasGroup, 0f);
             SetCanvasAlpha(pausePlayCanvasGroup, 0f);
@@ -171,10 +166,9 @@ public class RaycastInteractor : MonoBehaviour
 
         bool looking = objectLookedAt == currentTarget;
 
-        // Si apuntamos al objeto actual
         if (looking)
         {
-            if (isAudioPlaying || hasInteracted)
+            if (isVideoPlaying || hasInteracted)
             {
                 SetCanvasAlpha(pausePlayCanvasGroup, 1f);
                 SetCanvasAlpha(interactionCanvasGroup, 0f);
@@ -187,8 +181,7 @@ public class RaycastInteractor : MonoBehaviour
         }
         else
         {
-            // Si dejamos de apuntar y hay audio sonando o pausado, mantener solo pausePlayCanvas
-            if (isAudioPlaying || hasInteracted)
+            if (isVideoPlaying || hasInteracted)
             {
                 SetCanvasAlpha(pausePlayCanvasGroup, 1f);
                 SetCanvasAlpha(interactionCanvasGroup, 0f);

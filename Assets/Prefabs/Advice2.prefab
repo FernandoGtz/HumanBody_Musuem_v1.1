@@ -417,8 +417,7 @@ GameObject:
   - component: {fileID: 654098482581615540}
   - component: {fileID: 1876941905276536825}
   - component: {fileID: 6647405181086350145}
-  - component: {fileID: 5825508493812753632}
-  m_Layer: 0
+  m_Layer: 10
   m_Name: CubeColliderInteraction
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -434,8 +433,8 @@ Transform:
   m_GameObject: {fileID: 8912856765852200796}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: -2.47, y: 0.7216464, z: 0.603}
-  m_LocalScale: {x: 1.9625, y: 2.4875, z: 1.4875}
+  m_LocalPosition: {x: -2.47, y: 0.919, z: 0.013}
+  m_LocalScale: {x: 1.4228126, y: 1.8656249, z: 0.1115625}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 5404452352257830879}
@@ -508,7 +507,7 @@ BoxCollider:
     serializedVersion: 2
     m_Bits: 0
   m_LayerOverridePriority: 0
-  m_IsTrigger: 1
+  m_IsTrigger: 0
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
@@ -611,19 +610,3 @@ AudioSource:
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 4
---- !u!114 &5825508493812753632
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8912856765852200796}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 760ebe56d56cad846ae8a66e11a4ea6c, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  pressFCanvas: {fileID: 0}
-  exitCanvas: {fileID: 0}
-  audioSource: {fileID: 6647405181086350145}
-  canvasSwitchDelay: 0.2
