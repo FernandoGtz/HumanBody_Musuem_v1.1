@@ -95,7 +95,7 @@ public class RaycastInteractorUniversal : MonoBehaviour
                     else if (currentAudio != null)
                     {
                         currentMediaType = MediaType.Audio;
-                        isMediaPlaying = AudioManager.Instance.IsAudioPlaying(currentAudio);
+                        isMediaPlaying = MediaManager.Instance.IsAudioPlaying(currentAudio);
                         mediaDuration = currentAudio.clip != null ? currentAudio.clip.length : 0f;
                     }
                     else
@@ -152,10 +152,10 @@ public class RaycastInteractorUniversal : MonoBehaviour
         switch (currentMediaType)
         {
             case MediaType.Video:
-                currentVideo.Play();
+                MediaManager.Instance.PlayVideo(currentVideo, currentTarget);
                 break;
             case MediaType.Audio:
-                AudioManager.Instance.PlayAudio(currentAudio, currentTarget);
+                MediaManager.Instance.PlayAudio(currentAudio, currentTarget);
                 break;
         }
     }
@@ -165,25 +165,23 @@ public class RaycastInteractorUniversal : MonoBehaviour
         switch (currentMediaType)
         {
             case MediaType.Video:
-                if (currentVideo.isPlaying)
+                MediaManager.Instance.ToggleVideo();
+                isMediaPlaying = MediaManager.Instance.IsVideoPlaying(currentVideo);
+                if (isMediaPlaying)
                 {
-                    currentVideo.Pause();
-                    isMediaPlaying = false;
-                    PauseRadialProgress();
-                    ShowPlayIcon(); // 🔹 Mostrar ícono de "Play" al pausar
+                    ResumeRadialProgress();
+                    ShowPauseIcon();
                 }
                 else
                 {
-                    currentVideo.Play();
-                    isMediaPlaying = true;
-                    ResumeRadialProgress();
-                    ShowPauseIcon(); // 🔹 Mostrar ícono de "Pause" al reanudar
+                    PauseRadialProgress();
+                    ShowPlayIcon();
                 }
                 break;
 
             case MediaType.Audio:
-                AudioManager.Instance.ToggleAudio();
-                isMediaPlaying = AudioManager.Instance.IsAudioPlaying(currentAudio);
+                MediaManager.Instance.ToggleAudio();
+                isMediaPlaying = MediaManager.Instance.IsAudioPlaying(currentAudio);
 
                 if (isMediaPlaying)
                 {
@@ -207,7 +205,7 @@ public class RaycastInteractorUniversal : MonoBehaviour
                 if (currentVideo != null) currentVideo.Stop();
                 break;
             case MediaType.Audio:
-                if (currentAudio != null) AudioManager.Instance.StopCurrentAudio();
+                if (currentAudio != null) MediaManager.Instance.StopCurrentAudio();
                 break;
         }
         HideIcons(); // 🔹 Asegura que ambos íconos se oculten
@@ -238,7 +236,7 @@ public class RaycastInteractorUniversal : MonoBehaviour
             case MediaType.Video:
                 return currentVideo != null && currentVideo.isPlaying;
             case MediaType.Audio:
-                return currentAudio != null && AudioManager.Instance.IsAudioPlaying(currentAudio);
+                return currentAudio != null && MediaManager.Instance.IsAudioPlaying(currentAudio);
             default:
                 return false;
         }

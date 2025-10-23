@@ -7652,7 +7652,7 @@ GameObject:
   - component: {fileID: 1065890961}
   - component: {fileID: 1065890960}
   - component: {fileID: 1065890962}
-  - component: {fileID: 1065890963}
+  - component: {fileID: 1065890964}
   m_Layer: 0
   m_Name: GameManager
   m_TagString: Untagged
@@ -7703,7 +7703,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   canvasInicio: {fileID: 191810972}
   tiempoEspera: 3
---- !u!114 &1065890963
+--- !u!114 &1065890964
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -7712,7 +7712,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 1065890959}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 14b2bd3234257134eb1fa157220f1006, type: 3}
+  m_Script: {fileID: 11500000, guid: 6904ebca4939b204da6f0729d579e483, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
 --- !u!1001 &1072728815
