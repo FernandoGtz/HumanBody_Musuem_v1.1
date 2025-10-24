@@ -40,18 +40,18 @@ public class PlayerMovement : MonoBehaviour
 
     private void Update()
     {
-        // Movimiento
+        // Comprobar si está en el suelo
         isGrounded = controller.isGrounded;
         if (isGrounded && velocity.y < 0)
         {
             velocity.y = -2f; // Mantener al jugador pegado al suelo
         }
 
+        // Movimiento horizontal
         float x = Input.GetAxis("Horizontal");
         float z = Input.GetAxis("Vertical");
         bool isRunning = Input.GetKey(KeyCode.LeftShift);
         float currentSpeed = isRunning ? runSpeed : walkSpeed;
-
         Vector3 move = transform.right * x + transform.forward * z;
         controller.Move(move * currentSpeed * Time.deltaTime);
 

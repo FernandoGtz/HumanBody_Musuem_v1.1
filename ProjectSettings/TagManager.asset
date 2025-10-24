@@ -14,7 +14,7 @@ TagManager:
   - 
   - MinimapHidden
   - 
-  - 
+  - InteractorRaycast
   - MultimediaRaycast
   - 
   - 
