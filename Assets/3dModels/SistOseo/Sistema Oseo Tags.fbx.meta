@@ -1,9 +1,19 @@
 fileFormatVersion: 2
-guid: d3db76957ee51be4ba3970e1db8387a5
+guid: 46254e574c3b57844aa5aeb7c9f82ceb
 ModelImporter:
   serializedVersion: 22200
   internalIDToNameTable: []
-  externalObjects: {}
+  externalObjects:
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: Diffuse_gimp
+    second: {fileID: 2800000, guid: 2caf444f47c0bf447a62dd91ed527753, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: Normals_gimp
+    second: {fileID: 2800000, guid: af8b128d5aa4a9a4db45d93c807a8070, type: 3}
   materials:
     materialImportMode: 2
     materialName: 0
