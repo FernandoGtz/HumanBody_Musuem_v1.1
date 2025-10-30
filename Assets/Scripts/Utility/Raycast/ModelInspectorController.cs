@@ -3,135 +3,265 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 
-[RequireComponent(typeof(Collider))]
 public class ModelInspectorController : MonoBehaviour
 {
     [Header("Referencias principales")]
-    [Tooltip("Transform del modelo que rotaremos (padre del modelo completo).")]
     [SerializeField] private Transform modelRoot;
-    [Tooltip("Transform del jugador (compara con OnTriggerEnter/Exit).")]
-    [SerializeField] private Transform player;
-    [Tooltip("Cámara usada para el raycast (normalmente la cámara del player).")]
     [SerializeField] private Camera playerCamera;
 
     [Header("Canvases (CanvasGroup)")]
-    [SerializeField] private CanvasGroup canvasA_EnterPrompt; // "Presiona F..."
-    [SerializeField] private CanvasGroup canvasB_InspectModel; // Inspección modelo (rotación)
-    [SerializeField] private CanvasGroup canvasC_PieceDetail; // Detalles pieza (2 TMP + imagen)
+    [SerializeField] private CanvasGroup canvasA_EnterPrompt;
+    [SerializeField] private CanvasGroup canvasB_InspectModel;
+    [SerializeField] private CanvasGroup canvasC_PieceDetail;
 
     [Header("UI de detalles de pieza")]
     [SerializeField] private TextMeshProUGUI tmpName;
     [SerializeField] private TextMeshProUGUI tmpDescription;
-    [SerializeField] private Image pieceImage; // opcional; si es null o sprite null se oculta
+    [SerializeField] private Image pieceImage;
 
     [Header("Raycast / Layers")]
-    [Tooltip("Layer(s) de las piezas interactuables.")]
     [SerializeField] private LayerMask piecesLayer;
-    [Tooltip("Distancia máxima del raycast para detectar piezas.")]
     [SerializeField] private float raycastDistance = 10f;
 
-    [Header("Escalado de piezas")]
-    [Tooltip("Factor al que se escalará la pieza al apuntar (ej. 1.5).")]
-    [SerializeField] private float pieceScaleFactor = 1.5f;
-    [Tooltip("Tiempo de animación para escalar/desescalar pieza.")]
-    [SerializeField] private float pieceScaleTime = 0.2f;
-
     [Header("Rotación del modelo")]
-    [Tooltip("Duración (segundos) de cada rotación en 90° (Q/E).")]
     [SerializeField] private float rotationAnimTime = 1f;
 
-    [Header("Temporizadores de salida")]
-    [Tooltip("Segundos que esperamos si el player sale del collider mientras una pieza está escalada.")]
-    [SerializeField] private float exitWaitSeconds = 3f; // Nota: 1s adicional antes de restaurar rotación implementado internamente.
+    [Header("Audio Rotación")]
+    [SerializeField] private AudioSource rotationAudioSource;
+    [SerializeField] private AudioClip rotationClip;
+    [SerializeField, Range(0f,1f)] private float rotationVolume = 1f;
+
 
     // --- Estado interno ---
-    private bool playerInsideTrigger = false;
     private bool isInspectingModel = false;
     private bool isPieceSelected = false;
+    private bool isLookingAtModel = false;
 
     private Transform selectedPiece = null;
-    private Vector3 selectedPieceOriginalScale = Vector3.one;
-    private Quaternion modelOriginalRotation;
-    private bool modelRotatedFromOriginal = false;
-
-    // Coroutines references
-    private Coroutine pieceScaleCoroutine = null;
     private Coroutine rotationCoroutine = null;
-    private Coroutine exitCoroutine = null;
-
-    // Input lock for rotation when piece selected
-    private bool allowModelRotation => playerInsideTrigger && !isPieceSelected;
-
-    private void Reset()
-    {
-        // Asegura que el collider sea trigger para detectar player enter/exit.
-        var col = GetComponent<Collider>();
-        col.isTrigger = true;
-    }
+    private Coroutine returnToInitialCoroutine = null;
+    private Quaternion initialRotation;
 
     private void Start()
     {
         if (playerCamera == null && Camera.main != null)
             playerCamera = Camera.main;
 
-        modelOriginalRotation = modelRoot != null ? modelRoot.rotation : Quaternion.identity;
+        if (modelRoot != null)
+            initialRotation = modelRoot.rotation;
 
-        // Inicialmente: Canvas A visible solo cuando player dentro; por ahora ocultamos todos.
-        SetCanvas(canvasA_EnterPrompt, false);
         SetCanvas(canvasB_InspectModel, false);
         SetCanvas(canvasC_PieceDetail, false);
+        // canvasA se deja según inspector
     }
 
     private void Update()
     {
+        DetectModelAim();
+        HandleInspectToggle();
         HandleRotationInput();
 
-        if (!playerInsideTrigger)
-            return;
-
-        // Toggle inspección con F
-        if (Input.GetKeyDown(KeyCode.F))
-        {
-            ToggleInspectMode();
-            return; // evitamos procesar raycast el mismo frame en que cambiamos modo
-        }
-
-        // Rotación del modelo con Q/E si se permite
-        if (allowModelRotation && rotationCoroutine == null)
-        {
-            if (Input.GetKeyDown(KeyCode.Q)) RotateModel(+90f);
-            if (Input.GetKeyDown(KeyCode.E)) RotateModel(-90f);
-        }
-
-        // Raycast solo si estamos inspeccionando
         if (isInspectingModel)
             ProcessRaycast();
+    }
 
-        if (isPieceSelected)
+    private void DetectModelAim()
+    {
+        if (playerCamera == null || modelRoot == null) return;
+
+        Ray ray = playerCamera.ScreenPointToRay(new Vector3(Screen.width / 2f, Screen.height / 2f, 0f));
+        bool hitModel = false;
+
+        if (Physics.Raycast(ray, out RaycastHit hit, raycastDistance, ~0, QueryTriggerInteraction.Ignore))
         {
-            Debug.DrawLine(selectedPiece.position, selectedPiece.position + Vector3.up, Color.red);
-            Debug.Log(selectedPiece.localPosition);
+            if (hit.transform == modelRoot || hit.transform.IsChildOf(modelRoot))
+                hitModel = true;
+        }
+
+        // Actualizamos estado de mirada
+        bool previouslyLooking = isLookingAtModel;
+        isLookingAtModel = hitModel;
+
+        // Si dejamos de mirar el modelo mientras estamos en inspección, salimos de inspección inmediatamente.
+        if (previouslyLooking && !isLookingAtModel && isInspectingModel)
+        {
+            // Salir del modo inspección por alejarse
+            isInspectingModel = false;
+            DeselectPieceImmediate();
+            SetCanvas(canvasB_InspectModel, false);
+            SetCanvas(canvasC_PieceDetail, false);
+            // canvasA no aparece porque no estamos mirando al modelo
+            // Programar regreso a rotacion inicial (si corresponde)
+            ScheduleReturnToInitialIfNeeded();
+        }
+
+        // Lógica de qué canvas mostrar (si no acabamos de forzar la salida)
+        if (isLookingAtModel)
+        {
+            if (isInspectingModel)
+            {
+                // Inspeccionando: solo canvas B
+                SetCanvas(canvasA_EnterPrompt, false);
+                SetCanvas(canvasB_InspectModel, true);
+            }
+            else
+            {
+                // Mirando pero no inspeccionando: solo canvas A
+                SetCanvas(canvasB_InspectModel, false);
+                SetCanvas(canvasA_EnterPrompt, true);
+            }
+        }
+        else
+        {
+            // No mira al modelo: ocultar ambos
+            SetCanvas(canvasA_EnterPrompt, false);
+            // Nota: si ya forzamos la salida de inspección arriba, canvasB ya fue ocultado.
+            SetCanvas(canvasB_InspectModel, false);
         }
     }
 
-    private void ToggleInspectMode()
+    private void HandleInspectToggle()
     {
-        isInspectingModel = !isInspectingModel;
-
-        if (isInspectingModel && isPieceSelected)
-            DeselectPieceImmediate();
-
-        if (!isInspectingModel)
+        if (Input.GetKeyDown(KeyCode.F))
         {
-            SetCanvas(canvasB_InspectModel, false);
-            SetCanvas(canvasA_EnterPrompt, true);
-            if (isPieceSelected) DeselectPieceImmediate();
-            if (exitCoroutine != null) StopCoroutine(exitCoroutine);
+            if (!isInspectingModel && !isLookingAtModel)
+                return; // solo se puede entrar a inspección si mira al modelo
+
+            isInspectingModel = !isInspectingModel;
+
+            if (!isInspectingModel)
+            {
+                // Salimos de inspección (toggle o por tecla)
+                DeselectPieceImmediate();
+                SetCanvas(canvasB_InspectModel, false);
+                SetCanvas(canvasC_PieceDetail, false);
+                if (isLookingAtModel)
+                    SetCanvas(canvasA_EnterPrompt, true);
+
+                // Programar regreso a rotación inicial si corresponde
+                ScheduleReturnToInitialIfNeeded();
+            }
+            else
+            {
+                // Entramos a inspección
+                // Cancelamos cualquier regreso planificado
+                CancelScheduledReturnToInitial();
+
+                DeselectPieceImmediate();
+                SetCanvas(canvasA_EnterPrompt, false);
+                if (isLookingAtModel)
+                    SetCanvas(canvasB_InspectModel, true);
+            }
+        }
+    }
+
+    private void HandleRotationInput()
+    {
+        if (!isInspectingModel || rotationCoroutine != null)
             return;
+
+        if (Input.GetKeyDown(KeyCode.Q))
+            RotateModel(+90f);
+        else if (Input.GetKeyDown(KeyCode.E))
+            RotateModel(-90f);
+    }
+
+    private void RotateModel(float deltaDegrees)
+    {
+        if (modelRoot == null || rotationCoroutine != null) return;
+
+        // Reproducir audio de rotación
+        if (rotationAudioSource != null && rotationClip != null)
+        {
+            rotationAudioSource.PlayOneShot(rotationClip, rotationVolume);
         }
 
-        SetCanvas(canvasA_EnterPrompt, false);
-        SetCanvas(canvasB_InspectModel, true);
+        Quaternion start = modelRoot.rotation;
+        Quaternion end = Quaternion.Euler(modelRoot.eulerAngles + Vector3.up * deltaDegrees);
+        rotationCoroutine = StartCoroutine(RotateOverTime(start, end, rotationAnimTime));
+    }
+
+
+    private IEnumerator RotateOverTime(Quaternion start, Quaternion end, float duration)
+    {
+        float t = 0f;
+        while (t < duration)
+        {
+            t += Time.deltaTime;
+            float p = Mathf.Clamp01(t / duration);
+            modelRoot.rotation = Quaternion.Slerp(start, end, p);
+            yield return null;
+        }
+
+        modelRoot.rotation = end;
+        rotationCoroutine = null;
+
+        // Si ya no estamos inspeccionando, programamos (si procede) el regreso a rotación inicial.
+        if (!isInspectingModel)
+            ScheduleReturnToInitialIfNeeded();
+    }
+
+    private void ScheduleReturnToInitialIfNeeded()
+    {
+        // Si ya hay un regreso programado, no hacemos nada.
+        if (returnToInitialCoroutine != null) return;
+
+        // Solo programamos si la rotación inicial está definida y el modelo no está en la rotación inicial ya
+        if (modelRoot == null) return;
+
+        // Si la rotación actual es prácticamente igual a la inicial, no volver.
+        if (Quaternion.Angle(modelRoot.rotation, initialRotation) < 0.01f) return;
+
+        // Lanzamos la corrutina que esperará 3s y luego intentará volver al initialRotation
+        returnToInitialCoroutine = StartCoroutine(ReturnToInitialAfterDelayCoroutine(3f));
+    }
+
+    private void CancelScheduledReturnToInitial()
+    {
+        if (returnToInitialCoroutine != null)
+        {
+            StopCoroutine(returnToInitialCoroutine);
+            returnToInitialCoroutine = null;
+        }
+    }
+
+    private IEnumerator ReturnToInitialAfterDelayCoroutine(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+
+        // Si el jugador volvió a inspeccionar, cancelamos el regreso
+        if (isInspectingModel)
+        {
+            returnToInitialCoroutine = null;
+            yield break;
+        }
+
+        // Esperar a que termine cualquier rotación en curso
+        while (rotationCoroutine != null)
+            yield return null;
+
+        // Si el jugador volvió a inspeccionar mientras esperábamos, abortar
+        if (isInspectingModel)
+        {
+            returnToInitialCoroutine = null;
+            yield break;
+        }
+
+        // Si ya estamos en la rotación inicial, no hacemos nada
+        if (Quaternion.Angle(modelRoot.rotation, initialRotation) < 0.01f)
+        {
+            returnToInitialCoroutine = null;
+            yield break;
+        }
+
+        // Iniciar la rotación de regreso
+        rotationCoroutine = StartCoroutine(RotateOverTime(modelRoot.rotation, initialRotation, rotationAnimTime));
+
+        // Esperar a que termine la rotación de regreso
+        while (rotationCoroutine != null)
+            yield return null;
+
+        returnToInitialCoroutine = null;
     }
 
     private void ProcessRaycast()
@@ -139,38 +269,31 @@ public class ModelInspectorController : MonoBehaviour
         if (playerCamera == null) return;
 
         Ray ray = playerCamera.ScreenPointToRay(new Vector3(Screen.width / 2f, Screen.height / 2f, 0f));
-        if (Physics.Raycast(ray, out RaycastHit hit, raycastDistance, piecesLayer))
+
+        if (Physics.Raycast(ray, out RaycastHit hit, raycastDistance, piecesLayer, QueryTriggerInteraction.Ignore))
         {
             Transform hitTransform = hit.transform;
-            if (isPieceSelected && hitTransform == selectedPiece) return;
+
+            if (isPieceSelected && hitTransform == selectedPiece)
+                return;
+
             DeselectPieceImmediate();
             SelectPiece(hitTransform);
         }
-        else
+        else if (isPieceSelected)
         {
-            if (isPieceSelected)
-            {
-                SetCanvas(canvasC_PieceDetail, false);
-                DeselectPieceSmooth();
-            }
+            SetCanvas(canvasC_PieceDetail, false);
+            DeselectPieceImmediate();
         }
     }
 
-    #region Selection / Deselection
     private void SelectPiece(Transform piece)
     {
         if (piece == null) return;
 
         isPieceSelected = true;
         selectedPiece = piece;
-        selectedPieceOriginalScale = piece.localScale;
 
-        if (exitCoroutine != null) { StopCoroutine(exitCoroutine); exitCoroutine = null; }
-
-        if (pieceScaleCoroutine != null) StopCoroutine(pieceScaleCoroutine);
-        pieceScaleCoroutine = StartCoroutine(ScaleOverTime(piece, selectedPieceOriginalScale * pieceScaleFactor, pieceScaleTime));
-
-        // Mostrar UI de detalles
         var info = piece.GetComponent<InteractableInfo>();
         if (info != null)
         {
@@ -198,179 +321,11 @@ public class ModelInspectorController : MonoBehaviour
 
     private void DeselectPieceImmediate()
     {
-        if (selectedPiece != null)
-        {
-            if (pieceScaleCoroutine != null) StopCoroutine(pieceScaleCoroutine);
-            selectedPiece.localScale = selectedPieceOriginalScale;
-        }
         selectedPiece = null;
         isPieceSelected = false;
         SetCanvas(canvasC_PieceDetail, false);
     }
 
-    private void DeselectPieceSmooth()
-    {
-        if (selectedPiece != null)
-        {
-            if (pieceScaleCoroutine != null) StopCoroutine(pieceScaleCoroutine);
-            pieceScaleCoroutine = StartCoroutine(ScaleBackAndClear(selectedPiece, selectedPieceOriginalScale, pieceScaleTime));
-        }
-    }
-
-    private IEnumerator ScaleBackAndClear(Transform piece, Vector3 targetScale, float time)
-    {
-        yield return ScaleOverTime(piece, targetScale, time);
-        selectedPiece = null;
-        isPieceSelected = false;
-        SetCanvas(canvasC_PieceDetail, false);
-    }
-
-    private IEnumerator ScaleOverTime(Transform piece, Vector3 targetScale, float duration)
-    {
-        if (piece == null) yield break;
-        Vector3 startScale = piece.localScale;
-        Vector3 originalLocalPos = piece.localPosition;
-
-        float t = 0f;
-        while (t < duration)
-        {
-            t += Time.deltaTime;
-            float p = Mathf.Clamp01(t / duration);
-            piece.localScale = Vector3.Lerp(startScale, targetScale, p);
-            piece.localPosition = originalLocalPos;
-            yield return null;
-        }
-
-        piece.localScale = targetScale;
-        piece.localPosition = originalLocalPos;
-    }
-    #endregion
-
-    #region Rotation logic
-    private void HandleRotationInput()
-    {
-        if (!allowModelRotation || rotationCoroutine != null) return;
-
-        if (Input.GetKeyDown(KeyCode.Q)) RotateModel(90f);
-        else if (Input.GetKeyDown(KeyCode.E)) RotateModel(-90f);
-    }
-
-    private void RotateModel(float deltaDegrees)
-    {
-        if (modelRoot == null || rotationCoroutine != null) return;
-        Quaternion start = modelRoot.rotation;
-        Quaternion end = Quaternion.Euler(modelRoot.eulerAngles + Vector3.up * deltaDegrees);
-        rotationCoroutine = StartCoroutine(RotateOverTime(start, end, rotationAnimTime));
-    }
-
-    private IEnumerator RotateOverTime(Quaternion start, Quaternion end, float duration)
-    {
-        float t = 0f;
-        while (t < duration)
-        {
-            t += Time.deltaTime;
-            float p = Mathf.Clamp01(t / duration);
-            modelRoot.rotation = Quaternion.Slerp(start, end, p);
-            yield return null;
-        }
-        modelRoot.rotation = end;
-        rotationCoroutine = null;
-    }
-
-    private void RestoreModelRotation()
-    {
-        if (modelRoot == null) return;
-        if (rotationCoroutine != null) StopCoroutine(rotationCoroutine);
-        rotationCoroutine = StartCoroutine(RestoreRotationCoroutine());
-    }
-
-    private IEnumerator RestoreRotationCoroutine()
-    {
-        Quaternion start = modelRoot.rotation;
-        Quaternion end = modelOriginalRotation;
-        float t = 0f;
-        while (t < rotationAnimTime)
-        {
-            t += Time.deltaTime;
-            float p = Mathf.Clamp01(t / rotationAnimTime);
-            modelRoot.rotation = Quaternion.Slerp(start, end, p);
-            yield return null;
-        }
-        modelRoot.rotation = end;
-        modelRotatedFromOriginal = false;
-    }
-    #endregion
-
-    #region Trigger detection
-    private void OnTriggerEnter(Collider other)
-    {
-        if (player == null || other.transform != player) return;
-
-        playerInsideTrigger = true;
-        SetCanvas(canvasA_EnterPrompt, true);
-
-        if (exitCoroutine != null)
-        {
-            StopCoroutine(exitCoroutine);
-            exitCoroutine = null;
-        }
-    }
-
-    private void OnTriggerExit(Collider other)
-    {
-        if (player == null || other.transform != player) return;
-
-        playerInsideTrigger = false;
-        SetCanvas(canvasA_EnterPrompt, false);
-        SetCanvas(canvasB_InspectModel, false);
-        isInspectingModel = false;
-
-        if (isPieceSelected && selectedPiece != null)
-        {
-            if (exitCoroutine != null) StopCoroutine(exitCoroutine);
-            exitCoroutine = StartCoroutine(ExitWaitAndRestore(selectedPiece, selectedPieceOriginalScale));
-        }
-        else
-        {
-            SetCanvas(canvasC_PieceDetail, false);
-        }
-    }
-
-    private IEnumerator ExitWaitAndRestore(Transform pieceAtExit, Vector3 originalScale)
-    {
-        float waited = 0f;
-        while (waited < exitWaitSeconds)
-        {
-            if (playerInsideTrigger)
-            {
-                exitCoroutine = null;
-                yield break;
-            }
-            waited += Time.deltaTime;
-            yield return null;
-        }
-
-        if (pieceAtExit != null)
-        {
-            if (pieceScaleCoroutine != null) StopCoroutine(pieceScaleCoroutine);
-            pieceScaleCoroutine = StartCoroutine(ScaleOverTime(pieceAtExit, originalScale, pieceScaleTime));
-        }
-
-        SetCanvas(canvasC_PieceDetail, false);
-        isPieceSelected = false;
-        selectedPiece = null;
-
-        if (modelRotatedFromOriginal)
-        {
-            yield return new WaitForSeconds(1f);
-            RestoreModelRotation();
-        }
-
-        exitCoroutine = null;
-    }
-    #endregion
-
-    #region Utilities
     private void SetCanvas(CanvasGroup cg, bool visible)
     {
         if (cg == null) return;
@@ -378,5 +333,4 @@ public class ModelInspectorController : MonoBehaviour
         cg.blocksRaycasts = visible;
         cg.interactable = visible;
     }
-    #endregion
 }
