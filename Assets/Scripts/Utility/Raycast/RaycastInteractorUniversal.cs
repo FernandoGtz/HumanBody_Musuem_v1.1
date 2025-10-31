@@ -7,6 +7,8 @@ public class RaycastInteractorUniversal : MonoBehaviour
     [Header("Raycast Settings")]
     public float maxDistance = 5f;
     public LayerMask interactableLayer;
+    public LayerMask obstacleLayer;
+
     public KeyCode interactKey = KeyCode.F;
 
     [Header("UI Settings")]
@@ -15,8 +17,12 @@ public class RaycastInteractorUniversal : MonoBehaviour
     public GameObject radialProgressCanvas;
 
     [Header("Icons (Play/Pause)")]
-    public RawImage playIcon;  // 🔹 Nuevo: ícono de "Play"
-    public RawImage pauseIcon; // 🔹 Nuevo: ícono de "Pause"
+    public RawImage playIcon;
+    public RawImage pauseIcon;
+
+    [Header("Interaction Audio")]
+    public AudioClip interactionClip;
+    private AudioSource interactionAudioSource;
 
     [Header("Interaction Settings")]
     public float interactionRange = 5f;
@@ -29,8 +35,8 @@ public class RaycastInteractorUniversal : MonoBehaviour
     private AudioSource currentAudio;
     private bool hasInteracted = false;
     private bool isMediaPlaying = false;
+    private enum MediaType { None, Video, Audio }
     private MediaType currentMediaType;
-
     private GameObject objectLookedAt;
 
     private CanvasGroup interactionCanvasGroup;
@@ -43,10 +49,9 @@ public class RaycastInteractorUniversal : MonoBehaviour
     private float mediaPlayTime = 0f;
     private Material radialMaterial;
 
-    private enum MediaType { None, Video, Audio }
-
     void Start()
     {
+        // CanvasGroups
         InitializeCanvasGroup(ref interactionCanvasGroup, interactionCanvas);
         InitializeCanvasGroup(ref pausePlayCanvasGroup, pausePlayCanvas);
         InitializeCanvasGroup(ref radialProgressCanvasGroup, radialProgressCanvas);
@@ -55,6 +60,7 @@ public class RaycastInteractorUniversal : MonoBehaviour
         SetCanvasAlpha(pausePlayCanvasGroup, 0f);
         SetCanvasAlpha(radialProgressCanvasGroup, 0f);
 
+        // Radial Material
         if (radialProgressRawImage != null)
         {
             radialMaterial = new Material(Shader.Find("UI/RadialFill"));
@@ -62,22 +68,38 @@ public class RaycastInteractorUniversal : MonoBehaviour
             SetRadialFill(0f);
         }
 
-        // 🔹 Asegurar que ambos iconos estén ocultos al inicio
         if (playIcon != null) playIcon.gameObject.SetActive(false);
         if (pauseIcon != null) pauseIcon.gameObject.SetActive(false);
+
+        // AudioSource de interacción
+        interactionAudioSource = gameObject.AddComponent<AudioSource>();
+        interactionAudioSource.playOnAwake = false;
+        interactionAudioSource.spatialBlend = 0f;
+        interactionAudioSource.volume = 1f;
     }
 
     void Update()
     {
+        // Raycast
         Ray ray = new Ray(Camera.main.transform.position, Camera.main.transform.forward);
-        RaycastHit hit;
-        bool hitSomething = Physics.Raycast(ray, out hit, maxDistance, interactableLayer);
-        objectLookedAt = hitSomething ? hit.collider.gameObject : null;
+        RaycastHit[] hits = Physics.RaycastAll(ray, maxDistance, interactableLayer | obstacleLayer);
+        System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+
+        GameObject detectedObject = null;
+        bool blocked = false;
+
+        foreach (var h in hits)
+        {
+            int hitLayer = h.collider.gameObject.layer;
+            if (((1 << hitLayer) & obstacleLayer) != 0) { blocked = true; break; }
+            if (((1 << hitLayer) & interactableLayer) != 0) { detectedObject = h.collider.gameObject; break; }
+        }
+
+        objectLookedAt = (!blocked) ? detectedObject : null;
 
         if (objectLookedAt != null)
         {
             float distance = Vector3.Distance(transform.position, objectLookedAt.transform.position);
-
             if (distance <= interactionRange)
             {
                 if (currentTarget != objectLookedAt)
@@ -95,13 +117,10 @@ public class RaycastInteractorUniversal : MonoBehaviour
                     else if (currentAudio != null)
                     {
                         currentMediaType = MediaType.Audio;
-                        isMediaPlaying = MediaManager.Instance.IsAudioPlaying(currentAudio);
+                        isMediaPlaying = currentAudio.isPlaying;
                         mediaDuration = currentAudio.clip != null ? currentAudio.clip.length : 0f;
                     }
-                    else
-                    {
-                        currentMediaType = MediaType.None;
-                    }
+                    else currentMediaType = MediaType.None;
 
                     hasInteracted = isMediaPlaying;
                 }
@@ -110,13 +129,20 @@ public class RaycastInteractorUniversal : MonoBehaviour
 
                 if (Input.GetKeyDown(interactKey) && currentMediaType != MediaType.None)
                 {
+                    // 🔹 Bloqueo si NPC está hablando
+                    if (MediaManager.Instance.IsNPCTalking) return;
+
+                    // 🔹 Audio de interacción
+                    if (interactionClip != null)
+                        interactionAudioSource.PlayOneShot(interactionClip);
+
                     if (!hasInteracted)
                     {
                         PlayMedia();
                         isMediaPlaying = true;
                         hasInteracted = true;
                         StartRadialProgress();
-                        ShowPauseIcon(); // 🔹 Mostrar el ícono de pausa al iniciar reproducción
+                        ShowPauseIcon();
                     }
                     else
                     {
@@ -139,9 +165,7 @@ public class RaycastInteractorUniversal : MonoBehaviour
         {
             float distance = Vector3.Distance(transform.position, currentTarget.transform.position);
             if (distance > interactionRange)
-            {
                 HandleExitRange();
-            }
         }
 
         UpdateRadialProgress();
@@ -167,32 +191,12 @@ public class RaycastInteractorUniversal : MonoBehaviour
             case MediaType.Video:
                 MediaManager.Instance.ToggleVideo();
                 isMediaPlaying = MediaManager.Instance.IsVideoPlaying(currentVideo);
-                if (isMediaPlaying)
-                {
-                    ResumeRadialProgress();
-                    ShowPauseIcon();
-                }
-                else
-                {
-                    PauseRadialProgress();
-                    ShowPlayIcon();
-                }
+                if (isMediaPlaying) ShowPauseIcon(); else ShowPlayIcon();
                 break;
-
             case MediaType.Audio:
                 MediaManager.Instance.ToggleAudio();
                 isMediaPlaying = MediaManager.Instance.IsAudioPlaying(currentAudio);
-
-                if (isMediaPlaying)
-                {
-                    ResumeRadialProgress();
-                    ShowPauseIcon();
-                }
-                else
-                {
-                    PauseRadialProgress();
-                    ShowPlayIcon();
-                }
+                if (isMediaPlaying) ShowPauseIcon(); else ShowPlayIcon();
                 break;
         }
     }
@@ -208,9 +212,9 @@ public class RaycastInteractorUniversal : MonoBehaviour
                 if (currentAudio != null) MediaManager.Instance.StopCurrentAudio();
                 break;
         }
-        HideIcons(); // 🔹 Asegura que ambos íconos se oculten
+        HideIcons();
     }
-    
+
     private void ShowPlayIcon()
     {
         if (pauseIcon != null) pauseIcon.gameObject.SetActive(false);
@@ -229,28 +233,13 @@ public class RaycastInteractorUniversal : MonoBehaviour
         if (pauseIcon != null) pauseIcon.gameObject.SetActive(false);
     }
 
-    private bool IsMediaPlaying()
-    {
-        switch (currentMediaType)
-        {
-            case MediaType.Video:
-                return currentVideo != null && currentVideo.isPlaying;
-            case MediaType.Audio:
-                return currentAudio != null && MediaManager.Instance.IsAudioPlaying(currentAudio);
-            default:
-                return false;
-        }
-    }
-
     private void InitializeCanvasGroup(ref CanvasGroup canvasGroup, GameObject canvas)
     {
         if (canvas != null)
         {
             canvasGroup = canvas.GetComponent<CanvasGroup>();
             if (canvasGroup == null)
-            {
                 canvasGroup = canvas.AddComponent<CanvasGroup>();
-            }
         }
     }
 
@@ -266,7 +255,7 @@ public class RaycastInteractorUniversal : MonoBehaviour
 
     private void HandleNotLookingAtObject()
     {
-        if (currentMediaType != MediaType.None && (IsMediaPlaying() || hasInteracted))
+        if (currentMediaType != MediaType.None && (isMediaPlaying || hasInteracted))
         {
             SetCanvasAlpha(pausePlayCanvasGroup, 1f);
             SetCanvasAlpha(interactionCanvasGroup, 0f);
@@ -284,7 +273,7 @@ public class RaycastInteractorUniversal : MonoBehaviour
     {
         StopMedia();
         StopRadialProgress();
-        
+
         currentTarget = null;
         currentVideo = null;
         currentAudio = null;
@@ -299,7 +288,7 @@ public class RaycastInteractorUniversal : MonoBehaviour
 
     private void UpdateCanvas()
     {
-        if (currentMediaType == MediaType.None) 
+        if (MediaManager.Instance.IsNPCTalking)
         {
             SetCanvasAlpha(interactionCanvasGroup, 0f);
             SetCanvasAlpha(pausePlayCanvasGroup, 0f);
@@ -326,28 +315,17 @@ public class RaycastInteractorUniversal : MonoBehaviour
         }
         else
         {
-            if (isMediaPlaying || hasInteracted)
-            {
-                SetCanvasAlpha(pausePlayCanvasGroup, 1f);
-                SetCanvasAlpha(interactionCanvasGroup, 0f);
-                SetCanvasAlpha(radialProgressCanvasGroup, 1f);
-            }
-            else
-            {
-                SetCanvasAlpha(interactionCanvasGroup, 0f);
-                SetCanvasAlpha(pausePlayCanvasGroup, 0f);
-                SetCanvasAlpha(radialProgressCanvasGroup, 0f);
-            }
+            SetCanvasAlpha(interactionCanvasGroup, 0f);
+            SetCanvasAlpha(pausePlayCanvasGroup, 0f);
+            SetCanvasAlpha(radialProgressCanvasGroup, 0f);
         }
     }
 
-    // Métodos para controlar el progreso radial
+    // ---------------- Radial Methods ----------------
     private void SetRadialFill(float amount)
     {
         if (radialMaterial != null)
-        {
             radialMaterial.SetFloat("_FillAmount", amount);
-        }
     }
 
     private void StartRadialProgress()
@@ -371,33 +349,23 @@ public class RaycastInteractorUniversal : MonoBehaviour
         SetCanvasAlpha(radialProgressCanvasGroup, 0f);
     }
 
-    private void PauseRadialProgress()
-    {
-        isRadialActive = false;
-    }
-
+    private void PauseRadialProgress() => isRadialActive = false;
     private void ResumeRadialProgress()
     {
-        if (currentMediaType != MediaType.None && IsMediaPlaying() && currentFillAmount < 1f)
-        {
+        if (currentMediaType != MediaType.None && isMediaPlaying && currentFillAmount < 1f)
             isRadialActive = true;
-        }
     }
 
     private void UpdateRadialProgress()
     {
         if (isRadialActive && radialProgressRawImage != null && currentMediaType != MediaType.None)
         {
-            if (IsMediaPlaying())
+            if (isMediaPlaying)
             {
-                // Actualizar tiempo basado en el tipo de medio
                 switch (currentMediaType)
                 {
                     case MediaType.Video:
-                        if (currentVideo.frameCount > 0)
-                        {
-                            mediaPlayTime = (float)currentVideo.time;
-                        }
+                        if (currentVideo.frameCount > 0) mediaPlayTime = (float)currentVideo.time;
                         break;
                     case MediaType.Audio:
                         mediaPlayTime += Time.deltaTime;
@@ -420,7 +388,6 @@ public class RaycastInteractorUniversal : MonoBehaviour
         }
     }
 
-    // Método para reiniciar el progreso radial manualmente
     public void ResetRadialProgress()
     {
         currentFillAmount = 0f;
@@ -429,12 +396,9 @@ public class RaycastInteractorUniversal : MonoBehaviour
         isRadialActive = false;
     }
 
-    // Limpiar material cuando se destruya el objeto
     private void OnDestroy()
     {
         if (radialMaterial != null)
-        {
             DestroyImmediate(radialMaterial);
-        }
     }
 }

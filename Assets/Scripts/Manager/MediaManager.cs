@@ -11,6 +11,10 @@ public class MediaManager : MonoBehaviour
     private VideoPlayer currentVideo;
     private GameObject currentVideoObject;
 
+    // Estado de NPC hablando
+    private bool isNPCTalking = false;
+    public bool IsNPCTalking => isNPCTalking;
+
     private void Awake()
     {
         if (Instance == null)
@@ -31,6 +35,8 @@ public class MediaManager : MonoBehaviour
     {
         if (audioSource == null) return;
 
+        if (isNPCTalking) return; // Bloqueamos si NPC habla
+
         // Si hay un video reproduciéndose, lo detenemos
         if (currentVideo != null && currentVideo.isPlaying)
         {
@@ -39,7 +45,7 @@ public class MediaManager : MonoBehaviour
             currentVideoObject = null;
         }
 
-        // Si otro audio está sonando, detenerlo
+        // Si otro audio está sonando, lo detenemos
         if (currentAudio != null && currentAudio != audioSource)
         {
             currentAudio.Stop();
@@ -84,6 +90,8 @@ public class MediaManager : MonoBehaviour
     public void PlayVideo(VideoPlayer videoPlayer, GameObject videoObject)
     {
         if (videoPlayer == null) return;
+
+        if (isNPCTalking) return; // Bloqueamos si NPC habla
 
         // Si hay un audio en reproducción, lo detenemos
         if (currentAudio != null && currentAudio.isPlaying)
@@ -151,4 +159,35 @@ public class MediaManager : MonoBehaviour
             currentVideoObject = null;
         }
     }
+
+    // -----------------------------
+    // Métodos para manejar NPC hablando
+    // -----------------------------
+    public void SetNPCTalking(bool talking)
+    {
+        isNPCTalking = talking;
+
+        if (talking)
+        {
+            // Detener cualquier audio/video de objetos mientras NPC habla
+            if (currentAudio != null)
+            {
+                currentAudio.Stop();
+                currentAudio = null;
+                currentAudioObject = null;
+            }
+            if (currentVideo != null)
+            {
+                currentVideo.Stop();
+                currentVideo = null;
+                currentVideoObject = null;
+            }
+        }
+    }
+
+    // Bloqueo general: audio/video u NPC hablando
+    public bool IsMediaPlayingOrNPCTalking =>
+        (currentAudio != null && currentAudio.isPlaying) ||
+        (currentVideo != null && currentVideo.isPlaying) ||
+        isNPCTalking;
 }

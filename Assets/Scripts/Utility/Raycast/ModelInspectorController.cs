@@ -9,10 +9,9 @@ public class ModelInspectorController : MonoBehaviour
     [SerializeField] private Transform modelRoot;
     [SerializeField] private Camera playerCamera;
 
-    [Header("Canvases (CanvasGroup)")]
-    [SerializeField] private CanvasGroup canvasA_EnterPrompt;
-    [SerializeField] private CanvasGroup canvasB_InspectModel;
-    [SerializeField] private CanvasGroup canvasC_PieceDetail;
+    [Header("Canvases LOCALES de este modelo")]
+    [SerializeField] private CanvasGroup localCanvasA_EnterPrompt;  // Canvas A LOCAL
+    [SerializeField] private CanvasGroup localCanvasB_InspectModel; // Canvas B LOCAL
 
     [Header("UI de detalles de pieza")]
     [SerializeField] private TextMeshProUGUI tmpName;
@@ -29,8 +28,7 @@ public class ModelInspectorController : MonoBehaviour
     [Header("Audio Rotación")]
     [SerializeField] private AudioSource rotationAudioSource;
     [SerializeField] private AudioClip rotationClip;
-    [SerializeField, Range(0f,1f)] private float rotationVolume = 1f;
-
+    [SerializeField, Range(0f, 1f)] private float rotationVolume = 1f;
 
     // --- Estado interno ---
     private bool isInspectingModel = false;
@@ -42,6 +40,10 @@ public class ModelInspectorController : MonoBehaviour
     private Coroutine returnToInitialCoroutine = null;
     private Quaternion initialRotation;
 
+    // Propiedades públicas para el manager
+    public bool IsInspecting => isInspectingModel;
+    public bool IsLookingAtModel => isLookingAtModel;
+
     private void Start()
     {
         if (playerCamera == null && Camera.main != null)
@@ -50,9 +52,24 @@ public class ModelInspectorController : MonoBehaviour
         if (modelRoot != null)
             initialRotation = modelRoot.rotation;
 
-        SetCanvas(canvasB_InspectModel, false);
-        SetCanvas(canvasC_PieceDetail, false);
-        // canvasA se deja según inspector
+        // Registrar este inspector en el manager
+        if (InspectorCanvasManager.Instance != null)
+        {
+            InspectorCanvasManager.Instance.RegisterInspector(this);
+        }
+
+        // Inicializar canvases locales como ocultos
+        SetLocalCanvasA(false);
+        SetLocalCanvasB(false);
+    }
+
+    private void OnDestroy()
+    {
+        // Desregistrar cuando se destruye el objeto
+        if (InspectorCanvasManager.Instance != null)
+        {
+            InspectorCanvasManager.Instance.UnregisterInspector(this);
+        }
     }
 
     private void Update()
@@ -78,45 +95,21 @@ public class ModelInspectorController : MonoBehaviour
                 hitModel = true;
         }
 
-        // Actualizamos estado de mirada
         bool previouslyLooking = isLookingAtModel;
         isLookingAtModel = hitModel;
 
-        // Si dejamos de mirar el modelo mientras estamos en inspección, salimos de inspección inmediatamente.
         if (previouslyLooking && !isLookingAtModel && isInspectingModel)
         {
-            // Salir del modo inspección por alejarse
             isInspectingModel = false;
             DeselectPieceImmediate();
-            SetCanvas(canvasB_InspectModel, false);
-            SetCanvas(canvasC_PieceDetail, false);
-            // canvasA no aparece porque no estamos mirando al modelo
-            // Programar regreso a rotacion inicial (si corresponde)
-            ScheduleReturnToInitialIfNeeded();
+            InspectorCanvasManager.Instance?.ClearCurrentInspectingModel(this);
+            InspectorCanvasManager.Instance?.SetCanvasC(false);
         }
 
-        // Lógica de qué canvas mostrar (si no acabamos de forzar la salida)
-        if (isLookingAtModel)
+        // Actualizar estados a través del manager
+        if (InspectorCanvasManager.Instance != null)
         {
-            if (isInspectingModel)
-            {
-                // Inspeccionando: solo canvas B
-                SetCanvas(canvasA_EnterPrompt, false);
-                SetCanvas(canvasB_InspectModel, true);
-            }
-            else
-            {
-                // Mirando pero no inspeccionando: solo canvas A
-                SetCanvas(canvasB_InspectModel, false);
-                SetCanvas(canvasA_EnterPrompt, true);
-            }
-        }
-        else
-        {
-            // No mira al modelo: ocultar ambos
-            SetCanvas(canvasA_EnterPrompt, false);
-            // Nota: si ya forzamos la salida de inspección arriba, canvasB ya fue ocultado.
-            SetCanvas(canvasB_InspectModel, false);
+            InspectorCanvasManager.Instance.UpdateCanvasStates();
         }
     }
 
@@ -124,41 +117,64 @@ public class ModelInspectorController : MonoBehaviour
     {
         if (Input.GetKeyDown(KeyCode.F))
         {
-            if (!isInspectingModel && !isLookingAtModel)
-                return; // solo se puede entrar a inspección si mira al modelo
+            if (!isInspectingModel && !isLookingAtModel) return;
 
             isInspectingModel = !isInspectingModel;
 
             if (!isInspectingModel)
             {
-                // Salimos de inspección (toggle o por tecla)
                 DeselectPieceImmediate();
-                SetCanvas(canvasB_InspectModel, false);
-                SetCanvas(canvasC_PieceDetail, false);
-                if (isLookingAtModel)
-                    SetCanvas(canvasA_EnterPrompt, true);
+                InspectorCanvasManager.Instance?.ClearCurrentInspectingModel(this);
+                InspectorCanvasManager.Instance?.SetCanvasC(false);
 
-                // Programar regreso a rotación inicial si corresponde
                 ScheduleReturnToInitialIfNeeded();
             }
             else
             {
-                // Entramos a inspección
-                // Cancelamos cualquier regreso planificado
                 CancelScheduledReturnToInitial();
-
                 DeselectPieceImmediate();
-                SetCanvas(canvasA_EnterPrompt, false);
-                if (isLookingAtModel)
-                    SetCanvas(canvasB_InspectModel, true);
+                
+                // Notificar al manager que este modelo está en modo inspección
+                InspectorCanvasManager.Instance?.SetCurrentInspectingModel(this);
             }
         }
     }
 
+    // Métodos públicos para que el manager controle los canvases locales
+    public void SetLocalCanvasA(bool visible)
+    {
+        if (localCanvasA_EnterPrompt == null) return;
+
+        localCanvasA_EnterPrompt.alpha = visible ? 1f : 0f;
+        localCanvasA_EnterPrompt.blocksRaycasts = visible;
+        localCanvasA_EnterPrompt.interactable = visible;
+    }
+
+    public void SetLocalCanvasB(bool visible)
+    {
+        if (localCanvasB_InspectModel == null) return;
+
+        localCanvasB_InspectModel.alpha = visible ? 1f : 0f;
+        localCanvasB_InspectModel.blocksRaycasts = visible;
+        localCanvasB_InspectModel.interactable = visible;
+    }
+
+    // Método para forzar salida de inspección (usado por el manager)
+    public void ForceExitInspection()
+    {
+        if (isInspectingModel)
+        {
+            isInspectingModel = false;
+            DeselectPieceImmediate();
+            SetLocalCanvasB(false);
+            ScheduleReturnToInitialIfNeeded();
+        }
+    }
+
+    // El resto de los métodos se mantienen igual...
     private void HandleRotationInput()
     {
-        if (!isInspectingModel || rotationCoroutine != null)
-            return;
+        if (!isInspectingModel || rotationCoroutine != null) return;
 
         if (Input.GetKeyDown(KeyCode.Q))
             RotateModel(+90f);
@@ -170,21 +186,19 @@ public class ModelInspectorController : MonoBehaviour
     {
         if (modelRoot == null || rotationCoroutine != null) return;
 
-        // Reproducir audio de rotación
         if (rotationAudioSource != null && rotationClip != null)
-        {
             rotationAudioSource.PlayOneShot(rotationClip, rotationVolume);
-        }
 
         Quaternion start = modelRoot.rotation;
         Quaternion end = Quaternion.Euler(modelRoot.eulerAngles + Vector3.up * deltaDegrees);
+
         rotationCoroutine = StartCoroutine(RotateOverTime(start, end, rotationAnimTime));
     }
-
 
     private IEnumerator RotateOverTime(Quaternion start, Quaternion end, float duration)
     {
         float t = 0f;
+
         while (t < duration)
         {
             t += Time.deltaTime;
@@ -196,23 +210,16 @@ public class ModelInspectorController : MonoBehaviour
         modelRoot.rotation = end;
         rotationCoroutine = null;
 
-        // Si ya no estamos inspeccionando, programamos (si procede) el regreso a rotación inicial.
         if (!isInspectingModel)
             ScheduleReturnToInitialIfNeeded();
     }
 
     private void ScheduleReturnToInitialIfNeeded()
     {
-        // Si ya hay un regreso programado, no hacemos nada.
         if (returnToInitialCoroutine != null) return;
-
-        // Solo programamos si la rotación inicial está definida y el modelo no está en la rotación inicial ya
         if (modelRoot == null) return;
-
-        // Si la rotación actual es prácticamente igual a la inicial, no volver.
         if (Quaternion.Angle(modelRoot.rotation, initialRotation) < 0.01f) return;
 
-        // Lanzamos la corrutina que esperará 3s y luego intentará volver al initialRotation
         returnToInitialCoroutine = StartCoroutine(ReturnToInitialAfterDelayCoroutine(3f));
     }
 
@@ -229,35 +236,29 @@ public class ModelInspectorController : MonoBehaviour
     {
         yield return new WaitForSeconds(delay);
 
-        // Si el jugador volvió a inspeccionar, cancelamos el regreso
         if (isInspectingModel)
         {
             returnToInitialCoroutine = null;
             yield break;
         }
 
-        // Esperar a que termine cualquier rotación en curso
         while (rotationCoroutine != null)
             yield return null;
 
-        // Si el jugador volvió a inspeccionar mientras esperábamos, abortar
         if (isInspectingModel)
         {
             returnToInitialCoroutine = null;
             yield break;
         }
 
-        // Si ya estamos en la rotación inicial, no hacemos nada
         if (Quaternion.Angle(modelRoot.rotation, initialRotation) < 0.01f)
         {
             returnToInitialCoroutine = null;
             yield break;
         }
 
-        // Iniciar la rotación de regreso
         rotationCoroutine = StartCoroutine(RotateOverTime(modelRoot.rotation, initialRotation, rotationAnimTime));
 
-        // Esperar a que termine la rotación de regreso
         while (rotationCoroutine != null)
             yield return null;
 
@@ -269,21 +270,44 @@ public class ModelInspectorController : MonoBehaviour
         if (playerCamera == null) return;
 
         Ray ray = playerCamera.ScreenPointToRay(new Vector3(Screen.width / 2f, Screen.height / 2f, 0f));
+        RaycastHit[] hits = Physics.RaycastAll(ray, raycastDistance, piecesLayer, QueryTriggerInteraction.Ignore);
 
-        if (Physics.Raycast(ray, out RaycastHit hit, raycastDistance, piecesLayer, QueryTriggerInteraction.Ignore))
+        if (hits.Length == 0)
         {
-            Transform hitTransform = hit.transform;
-
-            if (isPieceSelected && hitTransform == selectedPiece)
-                return;
-
-            DeselectPieceImmediate();
-            SelectPiece(hitTransform);
+            if (isPieceSelected)
+            {
+                InspectorCanvasManager.Instance?.SetCanvasC(false);
+                DeselectPieceImmediate();
+            }
+            return;
         }
-        else if (isPieceSelected)
+
+        System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+
+        Transform firstValidPiece = null;
+
+        foreach (var hit in hits)
         {
-            SetCanvas(canvasC_PieceDetail, false);
+            if (hit.transform.GetComponent<InteractableInfo>() != null)
+            {
+                firstValidPiece = hit.transform;
+                break;
+            }
+        }
+
+        if (firstValidPiece != null)
+        {
+            if (isPieceSelected && firstValidPiece == selectedPiece) return;
             DeselectPieceImmediate();
+            SelectPiece(firstValidPiece);
+        }
+        else
+        {
+            if (isPieceSelected)
+            {
+                InspectorCanvasManager.Instance?.SetCanvasC(false);
+                DeselectPieceImmediate();
+            }
         }
     }
 
@@ -295,10 +319,12 @@ public class ModelInspectorController : MonoBehaviour
         selectedPiece = piece;
 
         var info = piece.GetComponent<InteractableInfo>();
+
         if (info != null)
         {
             tmpName.text = info.nombreObjeto ?? "";
             tmpDescription.text = info.descripcion ?? "";
+
             if (pieceImage != null)
             {
                 if (info.imagen != null)
@@ -306,7 +332,8 @@ public class ModelInspectorController : MonoBehaviour
                     pieceImage.gameObject.SetActive(true);
                     pieceImage.sprite = info.imagen;
                 }
-                else pieceImage.gameObject.SetActive(false);
+                else
+                    pieceImage.gameObject.SetActive(false);
             }
         }
         else
@@ -316,21 +343,12 @@ public class ModelInspectorController : MonoBehaviour
             if (pieceImage != null) pieceImage.gameObject.SetActive(false);
         }
 
-        SetCanvas(canvasC_PieceDetail, true);
+        InspectorCanvasManager.Instance?.SetCanvasC(true);
     }
 
     private void DeselectPieceImmediate()
     {
         selectedPiece = null;
         isPieceSelected = false;
-        SetCanvas(canvasC_PieceDetail, false);
-    }
-
-    private void SetCanvas(CanvasGroup cg, bool visible)
-    {
-        if (cg == null) return;
-        cg.alpha = visible ? 1f : 0f;
-        cg.blocksRaycasts = visible;
-        cg.interactable = visible;
     }
 }
