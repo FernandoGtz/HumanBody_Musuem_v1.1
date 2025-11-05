@@ -611,7 +611,7 @@ AudioSource:
   m_audioClip: {fileID: 0}
   m_Resource: {fileID: 0}
   m_PlayOnAwake: 0
-  m_Volume: 0.3
+  m_Volume: 0.7
   m_Pitch: 1
   Loop: 0
   Mute: 0
@@ -725,7 +725,6 @@ MonoBehaviour:
   - {fileID: 8300000, guid: 2e8dfe355e570a8439f203159d51c510, type: 3}
   - {fileID: 8300000, guid: 53fad90894f11104095fa0f5fb1bafbe, type: 3}
   - {fileID: 8300000, guid: 2dba9de1d1f3f484ab751fac1668b2cf, type: 3}
-  interactionClip: {fileID: 8300000, guid: ddb1a6b8fef0ca2409b247c595aef451, type: 3}
 --- !u!95 &8530328739721911183 stripped
 Animator:
   m_CorrespondingSourceObject: {fileID: 5866666021909216657, guid: c9646a0c7e7dbff4a82520417d924082, type: 3}
